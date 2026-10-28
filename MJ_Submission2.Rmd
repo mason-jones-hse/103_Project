@@ -1,0 +1,412 @@
+---
+title: "Submission 2"
+output:
+  pdf_document: default
+  html_document: default
+date: "2026-10-15"
+---
+Resources used: Google searches for using str_remove to remove text from variables.  Chat.dartmouth.edu for identifying genes associated with stress and environmental responses; plot formatting, specifically correcting the spacing and margins around the axes and titles; troubleshooting some errors in my functions; and helping with adding and making jitter (submission 1 feedback) look a little less clustered. Used code from previous assignments for my general plotting style. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+## Submission 2a: Data Setup
+
+```{r}
+
+#load the three data sets
+#maternal characteristics and pregnancy outcomes
+covarData <- read.csv("/Users/masonjones/Downloads/GSE85307_covar-1.csv")
+#gene expression measurements
+geneexpressionData <- read.csv("/Users/masonjones/Downloads/GSE85307_geneExpression.csv")
+#microarray probe IDs to gene names
+genenamesData <- read.csv("/Users/masonjones/Downloads/GSE85307_geneNames.csv")
+
+#View(genenamesData)
+
+#check dimensions of each data set 
+#dim(covarData)
+#dim(geneexpressionData)
+#dim(genenamesData)
+
+#check column names to understand how each set is organized
+#participant info and sample IDs
+#colnames(covarData)
+#probe IDs and measurements
+#head(colnames(geneexpressionData))
+#probe IDs and their gene names
+#colnames(genenamesData)
+
+#look at first few rows of each set before cleaning and merging
+#head(covarData)
+#head(geneexpressionData[, 1:10])
+#head(genenamesData)
+
+#check if sample IDs in the covariate data match
+#the same IDs stored as column names in the gene expression data
+#so the correct gene expression measurements can be connected
+#to the correct participant characteristics
+#sum(covarData$geoID %in% colnames(geneexpressionData))
+
+#check for sample IDs that are in one set but not in the other
+#first column is taken out of this because it's for probe IDs
+#setdiff(covarData$geoID, colnames(geneexpressionData)[-1])
+#setdiff(colnames(geneexpressionData)[-1], covarData$geoID)
+
+```
+
+## Submission 2b: Data Cleaning
+
+```{r}
+
+#clean maternal vitamin D measurements
+#the original values have text before the measurement
+#so remove everything before the colon, then convert the values
+#to numeric, so vitamin D concentrations can be continuous.
+covarData <- covarData |>  
+  mutate(mat_vitD = as.numeric(str_remove(mat_vitD, ".*:"))
+         )
+
+#confirm that vitamin D is numeric
+#class(covarData$mat_vitD)
+#summarize the data to check if everything is reasonable
+#summary(covarData$mat_vitD)
+
+#create a categorical vitamin D variable from the continuous
+#measurement so that individuals with levels < 30ng/ml are
+#insufficient and >= 30ng/ml are sufficient
+covarData <- covarData |>  
+  mutate( 
+    vitData = if_else(mat_vitD >= 30, "Sufficient", "Insufficient")
+  ) 
+
+#count the individuals in each vitamin D group
+#table(covarData$vitData)
+
+#rename first column of the gene expression set
+#contains microarray probe IDs but imported as "X" so renaming
+#it to match it to the gene names set.
+geneexpressionData <- geneexpressionData |>  
+  rename(PROBEID = X)
+
+#turn the gene expression data to long format
+#long format puts all sample IDs into one column and 
+#expression values in another so each row can represent 1
+#probe measurement for 1 sample. 
+#PROBEID column unchanged, need to match with the genes
+geneexpressionLong <- geneexpressionData |> 
+  pivot_longer(
+    cols = -PROBEID, 
+    names_to = "geoID", 
+    values_to = "expression"
+  )
+
+#check to see if the gene names set has duplicate probe IDs
+#which could make more rows when merging sets
+#sum(duplicated(genenamesData$PROBEID))
+
+#look at the original pregnancy outcome categories
+#to see how normal pregnancy and preeclampsia are recorded
+#table(covarData$preg_preeclampsia)
+
+#clean the pregnancy outcome labels
+#remove "pregnancy_condition:"
+#makes it much simpler for boxplot
+covarData <- covarData |>  
+  mutate(preg_preeclampsia = str_remove(preg_preeclampsia,
+                                        "pregnancy_condition: "))
+#confirm that everything is correct and
+#count individuals for normal / preeclampsia
+#table(covarData$preg_preeclampsia)
+
+#merge all three data sets
+#match gene expression measurements to gene names
+#using PROBEID, then match those to maternal
+#characteristics using geoID, then it should 
+#result in a data set that gives you gene expression
+#+ gene name + participant info all together
+mergeData <- geneexpressionLong |>  
+  left_join(genenamesData, by = "PROBEID") |>  
+  left_join(covarData, by = "geoID")
+
+#look at merged data and check dimensions / 
+#first few rows
+#dim(mergeData)
+#head(mergeData)
+
+```
+
+## Submission 2c: Gene Selection
+
+```{r}
+
+#select SGK1, FOSL1, and FOSL2 genes, all involved in cellular
+#response to hormonal signals and stress
+#filtering keeps only the expression associated with it
+geneData <- mergeData |>  
+  filter(GENE %in% c("SGK1", "FOSL1", "FOSL2"))
+
+geneData |> 
+  count(GENE)
+
+#check the set including SGK1 measurements
+#first few rows should represent an SGK1 measurement associated
+#with a sample
+#dim(geneData)
+#head(geneData)
+
+#summarize SGK1 expression to look at the overall distribution
+#before making a plot
+#summary(geneData$expression)
+
+#check for missing values in all variables used 
+#sum(is.na(geneData$expression))
+#sum(is.na(geneData$mat_vitD))
+#sum(is.na(geneData$preg_preeclampsia))
+#sum(is.na(geneData$vitData))
+
+```
+
+## Submission 2d: Visualization Functions
+
+```{r}
+#plot 1: histogram of gene expression
+#describes how expression is distributed across the sample, with the x axis showing expression values and the y showing participant n.
+#looking at most common expression values / overall shape 
+
+#function allows same histogram to be made for different genes
+#data is the data frame and gene finds which gene to plot
+histoPlot <- function(data, gene) {
+  
+#filter data to keep observations for the selected gene
+plotData <- data |>  
+  filter(GENE == gene)
+  
+ggplot(plotData, aes(x = expression)) + 
+  geom_histogram(
+    binwidth = 0.1, 
+    fill = "#377EB8",
+    color = "black"
+  ) + 
+  #automatically update title and x axis for each gene (functions are cool)
+  labs( 
+    title = paste("Distribution of", gene, "Expression"), 
+    x = paste(gene, "Expression"),
+    y = "Number of Participants"
+  ) +
+  #keep it all the same across all plots
+  theme_minimal() + 
+  theme(
+    panel.grid.minor = element_blank(), 
+    panel.border = element_rect(
+      color = "gray40",
+      fill = NA, 
+      linewidth = 0.5
+    ), 
+    plot.title = element_text( 
+      hjust = 0,
+      face = "plain",
+      size = 12,
+      margin = margin(b = 15)
+      ),
+    axis.title.x = element_text(
+      size = 10,
+      margin = margin(t = 12)),
+    axis.title.y = element_text(
+      size = 10,
+      margin = margin(r = 12)
+    ),
+plot.margin = margin(15, 20, 15, 15)
+) 
+} 
+
+#histoPlot(geneData, "SGK1")
+#histoPlot(geneData, "FOSL1")
+#histoPlot(geneData, "FOSL2")
+```
+
+
+```{r}
+
+#plot 2: scatterplot of maternal vitamin D and gene expression
+#describes the relationship between vitamin D concentration and
+#expression for each gene, with both variables being continuous. 
+#each point is one individual's vitamin D concentration and gene expression.
+
+#function allows same plot to be made for different genes, continuous says which variable to use on x axis 
+scatterPlot <- function(data, gene, continuous) {
+
+#filter data to keep observations for specific gene
+plotData <- data |> 
+  filter(GENE == gene)
+
+#use continuous variable in the function
+#compare with expression for the gene
+ggplot(plotData, aes(x = .data[[continuous]], y = expression)) + 
+  geom_point(
+    color = "#377EB8",
+    size = 2, 
+    alpha = 0.7
+  ) + 
+  labs( 
+    title = paste("Maternal Vitamin D Concentration and", gene, "Expression"), 
+    x = "Maternal Vitamin D (ng/mL)",
+    y = paste(gene, "Expression")
+  ) +
+  theme_minimal() + 
+  theme(
+    panel.grid.minor = element_blank(), 
+    panel.border = element_rect(
+      color = "gray40",
+      fill = NA, 
+      linewidth = 0.5
+    ), 
+    plot.title = element_text( 
+      hjust = 0,
+      face = "plain",
+      size = 12,
+      margin = margin(b = 15)
+      ),
+    axis.title.x = element_text(
+      size = 10,
+      margin = margin(t = 12)),
+    axis.title.y = element_text(
+      size = 10,
+      margin = margin(r = 12)
+    ),
+plot.margin = margin(15, 20, 15, 15)
+) 
+}
+
+#scatterPlot(geneData, "SGK1", "mat_vitD")
+#scatterPlot(geneData, "FOSL1", "mat_vitD")
+#scatterPlot(geneData, "FOSL2", "mat_vitD")
+```
+
+
+```{r}
+
+#plot3: boxplot of gene expression by pregnancy outcome and vitamin D status. 
+#compares gene expression across two categorical variables
+#pregnancy outcome places individuals into normal and
+#preeclampsia groups. Vitamin D status places individuals
+#into sufficient and insufficient groups. 
+#each box summarizes the distribution of expression within a group.
+
+#function allows same plot to be made for different genes
+#categorical finds two variables used to group people
+boxPlot <- function(data, gene, categorical) {
+  
+#filter to keep observations for the specific gene
+plotData <- data |>  
+  filter(GENE == gene)
+
+#first categorical determines x axis
+#second determines fill colors
+#expression compared by resulting groups
+ggplot(plotData, aes(x = .data[[categorical[1]]], y = expression, fill = .data[[categorical[2]]]
+  )) + 
+  geom_boxplot(
+    color = "black",
+    alpha = 0.8, 
+    outlier.shape = NA
+  ) + 
+  #adding jitter per submission 1 correction
+    geom_point(
+    position = position_jitterdodge(
+      jitter.width = 0.25, 
+      dodge.width = 0.75
+    ),
+    size = 0.8,
+    alpha = 0.3, 
+    color = "gray40"
+  ) +
+  #use same. colors for vitamin D across all
+  #box plots
+  scale_fill_manual(
+    values = c("Insufficient" = "#377EB8",
+               "Sufficient" = "#E15759")
+  ) + 
+  labs( 
+    title = paste(gene, "Expression by Pregnancy Outcome and Vitamin D Status"),
+    x = "Pregnancy Outcome",
+    y = paste(gene, "Expression"), 
+    fill = "Vitamin D Status"
+  ) +
+  theme_minimal() + 
+  theme(
+    panel.grid.minor = element_blank(), 
+    panel.border = element_rect(
+      color = "gray40",
+      fill = NA, 
+      linewidth = 0.5
+    ), 
+    plot.title = element_text( 
+      hjust = 0,
+      face = "plain",
+      size = 12,
+      margin = margin(b = 15)
+      ),
+    axis.title.x = element_text(
+      size = 10,
+      margin = margin(t = 12)
+      ),
+    axis.title.y = element_text(
+      size = 10,
+      margin = margin(r = 12)
+    ),
+    axis.text.x = element_text(size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.position = "bottom",
+    legend.text = element_text(size = 10),
+    legend.title = element_text(size = 10),
+    legend.key.width = unit(0.8, "cm"),
+    plot.margin = margin(15, 20, 15, 15)
+  )
+}
+
+#boxPlot(geneData, "SGK1", c("preg_preeclampsia", "vitData"))
+#boxPlot(geneData, "FOSL1", c("preg_preeclampsia", "vitData"))
+#boxPlot(geneData, "FOSL2", c("preg_preeclampsia", "vitData"))
+```
+
+## Submission 2e: Plots
+
+```{r}
+#the main function to plot all three types for selected genes
+#takes a data frame, gene names, and one continuous
+#covariate, and two categorical covariates
+plotGenes <- function(data, genes, continuous, categorical) {
+  
+  #loop through each gene 
+  for (gene in genes) {
+    
+    #histogram of expression distribution
+    print(histoPlot(data, gene))
+    
+    #scatterplot comparing expression with 
+    #selected continuous covariate
+    print(scatterPlot(data, gene, continuous)) 
+    
+    #boplot comparing expression across two
+    #categorical covariates
+    print(boxPlot(data, gene, categorical))
+  }
+}
+
+#run the. funciton using SGK1, FOSL1, FOSL2
+#maternal vitamin D is the continuous covariate
+#pregnancy outcome and vitamin D status are
+#categorical
+plotGenes(
+  data = geneData, 
+  genes = c("SGK1", "FOSL1", "FOSL2"),
+  continuous = "mat_vitD",
+  categorical = c("preg_preeclampsia", "vitData")
+) 
+
+```
+
+
