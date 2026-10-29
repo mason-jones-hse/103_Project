@@ -320,8 +320,8 @@ ggplot(plotData, aes(x = .data[[categorical[1]]], y = expression, fill = .data[[
       dodge.width = 0.75
     ),
     size = 0.8,
-    alpha = 0.3, 
-    color = "gray40"
+    alpha = 0.5, 
+    color = "black"
   ) +
   #use same. colors for vitamin D across all
   #box plots
@@ -381,7 +381,7 @@ ggplot(plotData, aes(x = .data[[categorical[1]]], y = expression, fill = .data[[
 plotGenes <- function(data, genes, continuous, categorical) {
   
   #loop through each gene 
-  for (gene in genes) {
+  for(gene in genes) {
     
     #histogram of expression distribution
     print(histoPlot(data, gene))
