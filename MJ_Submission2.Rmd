@@ -323,7 +323,7 @@ ggplot(plotData, aes(x = .data[[categorical[1]]], y = expression, fill = .data[[
     alpha = 0.5, 
     color = "black"
   ) +
-  #use same. colors for vitamin D across all
+  #use same colors for vitamin D across all
   #box plots
   scale_fill_manual(
     values = c("Insufficient" = "#377EB8",
@@ -390,13 +390,13 @@ plotGenes <- function(data, genes, continuous, categorical) {
     #selected continuous covariate
     print(scatterPlot(data, gene, continuous)) 
     
-    #boplot comparing expression across two
+    #boxplot comparing expression across two
     #categorical covariates
     print(boxPlot(data, gene, categorical))
   }
 }
 
-#run the. funciton using SGK1, FOSL1, FOSL2
+#run the function using SGK1, FOSL1, FOSL2
 #maternal vitamin D is the continuous covariate
 #pregnancy outcome and vitamin D status are
 #categorical
